@@ -1,0 +1,10 @@
+{
+  "short_name": "NER-LOGIX",
+  "name": "NER-LOGIX - North Eastern Regional Logistics & Disaster Response",
+  "icons": [],
+  "start_url": "/",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait"
+}

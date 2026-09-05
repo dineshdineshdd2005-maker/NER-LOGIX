@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "FcmDeviceToken": {
+      "title": "FCM Device Token",
+      "description": "Registered device push notification token and topic subscriptions",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "description": "FCM Device Registration Token" },
+        "userId": { "type": "string", "description": "Unique identifier of device or user" },
+        "deviceType": { "type": "string", "description": "Device platform or browser" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of token update" }
+      },
+      "required": ["token", "userId", "updatedAt"]
+    },
+    "RealtimeAlert": {
+      "title": "Realtime Alert",
+      "description": "Real-time emergency road closure and critical disaster notification",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Notification headline" },
+        "body": { "type": "string", "description": "Detailed alert description" },
+        "alertType": { "type": "string", "description": "Type of alert" },
+        "severity": { "type": "string", "description": "Severity level" },
+        "corridor": { "type": "string", "description": "Affected highway corridor" },
+        "vehicleId": { "type": "string", "description": "Associated convoy or delivery vehicle ID" },
+        "timestamp": { "type": "string", "description": "Timestamp string of the incident" },
+        "pushedToFCM": { "type": "boolean", "description": "Whether alert was broadcasted via FCM" }
+      },
+      "required": ["title", "body", "alertType", "severity", "timestamp"]
+    },
+    "DeliveryNotification": {
+      "title": "Delivery Notification",
+      "description": "Real-time logistics delivery update and emergency supply alert",
+      "type": "object",
+      "properties": {
+        "deliveryId": { "type": "string", "description": "Delivery tracking ID" },
+        "vehicleId": { "type": "string", "description": "Assigned vehicle ID" },
+        "title": { "type": "string", "description": "Notification headline" },
+        "message": { "type": "string", "description": "Detailed delivery message" },
+        "status": { "type": "string", "description": "Delivery status" },
+        "eta": { "type": "string", "description": "Estimated time of arrival" },
+        "timestamp": { "type": "string", "description": "Timestamp of dispatch" },
+        "pushedToFCM": { "type": "boolean", "description": "Whether push alert was triggered" }
+      },
+      "required": ["deliveryId", "title", "message", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/fcm_device_tokens/{tokenId}": {
+      "schema": "FcmDeviceToken",
+      "description": "Collection of FCM device tokens for delivery and closure alerts"
+    },
+    "/realtime_alerts/{alertId}": {
+      "schema": "RealtimeAlert",
+      "description": "Real-time emergency road closures and disaster warnings broadcasted to devices"
+    },
+    "/delivery_notifications/{notificationId}": {
+      "schema": "DeliveryNotification",
+      "description": "Real-time delivery progress updates and supply alerts"
+    }
+  }
+}

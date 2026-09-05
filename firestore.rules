@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidToken(data) {
+      return data.token is string &&
+             data.userId is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidRealtimeAlert(data) {
+      return data.title is string &&
+             data.body is string &&
+             data.alertType is string &&
+             data.severity is string &&
+             data.timestamp is string;
+    }
+
+    function isValidDeliveryNotification(data) {
+      return data.deliveryId is string &&
+             data.title is string &&
+             data.message is string &&
+             data.timestamp is string;
+    }
+
+    match /fcm_device_tokens/{tokenId} {
+      allow read: if true;
+      allow create, update: if isValidToken(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /realtime_alerts/{alertId} {
+      allow read: if true;
+      allow create: if isValidRealtimeAlert(request.resource.data);
+      allow update, delete: if true;
+    }
+
+    match /delivery_notifications/{notificationId} {
+      allow read: if true;
+      allow create: if isValidDeliveryNotification(request.resource.data);
+      allow update, delete: if true;
+    }
+  }
+}
