@@ -326,12 +326,39 @@ export const AdminPanelView: React.FC = () => {
             </button>
           </div>
 
-          {/* Role & Authorized Personnel Directory */}
+          {/* Active Authenticated Session & Authorized Personnel Directory */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-sm text-slate-800">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-              <Users className="w-4 h-4 text-indigo-600" />
-              Role-Based Access Sandbox Directory
-            </span>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600" />
+                Active Session & Personnel Directory
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                Live Auth
+              </span>
+            </div>
+
+            {/* Currently Active Live Session Card */}
+            {currentUser && (
+              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-lg text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-950 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    {currentUser.name} (Current Session)
+                  </span>
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold">
+                    {currentUser.authProvider === 'google.com' ? 'Google Auth' : 'Operational'}
+                  </span>
+                </div>
+                <div className="text-[11px] font-mono text-indigo-700">{currentUser.email}</div>
+                <div className="text-[10px] text-slate-600">{currentUser.department} · Badge: <span className="font-mono font-bold text-slate-800">{currentUser.badgeId}</span></div>
+                <div className="text-[10px] text-indigo-900 font-semibold pt-1">Clearance Level: {currentUser.role}</div>
+              </div>
+            )}
+
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider pt-1">
+              Registered Agency Profiles:
+            </div>
 
             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
               {DEMO_USERS.map((usr) => (

@@ -5,6 +5,7 @@ import {
   collection, 
   doc, 
   setDoc, 
+  getDoc,
   addDoc, 
   onSnapshot, 
   query, 
@@ -14,14 +15,29 @@ import {
   getDocFromServer,
   Timestamp
 } from 'firebase/firestore';
+import { 
+  getAuth, 
+  Auth, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from 'firebase/auth';
 import { getMessaging, getToken, onMessage, isSupported, Messaging } from 'firebase/messaging';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { User, UserRole } from '../types';
 
 // Initialize Firebase App instance safely
 export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Cloud Firestore with dedicated database ID
 export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Initialize Firebase Authentication
+export const auth: Auth = getAuth(app);
+export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 
 // Test Firestore connection as per skill guidelines
 (async function testFirebaseConnection() {
@@ -301,3 +317,289 @@ function triggerLocalSystemNotification(title: string, body: string, category: '
     }
   }
 }
+
+export interface FirestoreRedistributionRecord {
+  id?: string;
+  transferId: string;
+  sourceDistrict: string;
+  targetDistrict: string;
+  commodity: string;
+  quantity: number;
+  unit: string;
+  urgency: string;
+  status: string;
+  timestamp: string;
+  approvedBy: string;
+}
+
+// Record an approved inventory redistribution transfer order in Firestore
+export async function recordRedistributionTransferToFirestore(transfer: {
+  transferId: string;
+  sourceDistrict: string;
+  targetDistrict: string;
+  commodity: string;
+  quantity: number;
+  unit: string;
+  urgency: string;
+  status: string;
+  approvedBy?: string;
+}): Promise<string> {
+  const record: FirestoreRedistributionRecord = {
+    transferId: transfer.transferId,
+    sourceDistrict: transfer.sourceDistrict,
+    targetDistrict: transfer.targetDistrict,
+    commodity: transfer.commodity,
+    quantity: transfer.quantity,
+    unit: transfer.unit,
+    urgency: transfer.urgency,
+    status: transfer.status,
+    timestamp: new Date().toISOString(),
+    approvedBy: transfer.approvedBy || 'Operator'
+  };
+
+  const colRef = collection(db, 'redistribution_transfers');
+  const docRef = await addDoc(colRef, record);
+
+  // Also log to delivery_notifications for real-time tracking
+  await pushDeliveryAlert({
+    deliveryId: `REDIST-${transfer.transferId.slice(0, 8)}`,
+    vehicleId: 'NER-REDIST-CONVOY',
+    title: `🚨 Emergency Redistribution: ${transfer.commodity}`,
+    message: `Allocated ${transfer.quantity} ${transfer.unit} from ${transfer.sourceDistrict} to ${transfer.targetDistrict}`,
+    status: 'Dispatched',
+    eta: '6-9 hours'
+  }).catch(() => {});
+
+  return docRef.id;
+}
+
+// Subscribe to real-time redistribution orders
+export function subscribeToRedistributionTransfers(onUpdate: (records: FirestoreRedistributionRecord[]) => void): () => void {
+  try {
+    const q = query(collection(db, 'redistribution_transfers'), limit(20));
+    return onSnapshot(q, (snapshot) => {
+      const items: FirestoreRedistributionRecord[] = [];
+      snapshot.forEach((d) => {
+        items.push({ id: d.id, ...(d.data() as FirestoreRedistributionRecord) });
+      });
+      onUpdate(items);
+    }, (error) => {
+      console.warn('Redistribution transfers listener error:', error);
+    });
+  } catch (err) {
+    console.warn('Error setting up redistribution listener:', err);
+    return () => {};
+  }
+}
+
+// --------------------------------------------------------------------------
+// Real Authentication & User Session Management (Non-Demo Persistent State)
+// --------------------------------------------------------------------------
+
+export interface FirestoreUserProfile {
+  userId: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  department: string;
+  badgeId: string;
+  avatar?: string;
+  authProvider?: string;
+  lastLogin: string;
+  createdAt?: string;
+  emailVerified?: boolean;
+}
+
+/**
+ * Persists or updates the user profile record in Firestore
+ */
+export async function saveUserProfileToFirestore(user: User): Promise<void> {
+  try {
+    const userDocRef = doc(db, 'users', user.id);
+    const profilePayload: FirestoreUserProfile = {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      department: user.department,
+      badgeId: user.badgeId,
+      avatar: user.avatar || '',
+      authProvider: user.authProvider || 'ner-portal',
+      lastLogin: new Date().toISOString(),
+      createdAt: user.createdAt || new Date().toISOString(),
+      emailVerified: user.emailVerified ?? true
+    };
+
+    await setDoc(userDocRef, profilePayload, { merge: true });
+    console.log('[Auth] User profile synchronized to Firestore:', user.id);
+  } catch (err) {
+    console.warn('[Auth] Error syncing user profile to Firestore (using local session fallback):', err);
+  }
+}
+
+/**
+ * Fetches the user profile document from Firestore by user ID
+ */
+export async function getUserProfileFromFirestore(userId: string): Promise<User | null> {
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    const snapshot = await getDoc(userDocRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data() as FirestoreUserProfile;
+      return {
+        id: data.userId,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        department: data.department,
+        badgeId: data.badgeId,
+        avatar: data.avatar,
+        authProvider: data.authProvider as any,
+        isRealAuth: true,
+        lastLogin: data.lastLogin,
+        createdAt: data.createdAt,
+        emailVerified: data.emailVerified
+      };
+    }
+  } catch (err) {
+    console.warn('[Auth] Error fetching profile from Firestore:', err);
+  }
+  return null;
+}
+
+/**
+ * Sign in with Google using Firebase Authentication Popup
+ */
+export async function signInWithGoogle(): Promise<User> {
+  try {
+    const cred = await signInWithPopup(auth, googleAuthProvider);
+    const fbUser = cred.user;
+
+    // Check if profile exists in Firestore
+    const existingProfile = await getUserProfileFromFirestore(fbUser.uid);
+
+    const userRecord: User = {
+      id: fbUser.uid,
+      name: fbUser.displayName || 'NER Authorized Personnel',
+      email: fbUser.email || 'operator@ner-logix.gov.in',
+      role: existingProfile?.role || 'Administrator',
+      department: existingProfile?.department || 'Ministry of Development of North Eastern Region (MDoNER)',
+      badgeId: existingProfile?.badgeId || `NER-GGL-${fbUser.uid.slice(0, 6).toUpperCase()}`,
+      avatar: fbUser.photoURL || undefined,
+      authProvider: 'google.com',
+      isRealAuth: true,
+      lastLogin: new Date().toISOString(),
+      createdAt: existingProfile?.createdAt || new Date().toISOString(),
+      emailVerified: fbUser.emailVerified
+    };
+
+    await saveUserProfileToFirestore(userRecord);
+    return userRecord;
+  } catch (error: any) {
+    console.error('[Auth] Google Sign-In error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Creates or restores an operational session with real credentials (non-demo)
+ */
+export async function createOperationalSession(params: {
+  name: string;
+  email: string;
+  role: UserRole;
+  department?: string;
+  badgeId?: string;
+  avatar?: string;
+}): Promise<User> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  const userId = `session-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  const userRecord: User = {
+    id: userId,
+    name: params.name.trim(),
+    email: cleanEmail,
+    role: params.role,
+    department: params.department?.trim() || 'Northeastern Logistics & Transport Command',
+    badgeId: params.badgeId?.trim() || `NER-OP-${Math.floor(1000 + Math.random() * 9000)}`,
+    avatar: params.avatar,
+    authProvider: 'ner-portal',
+    isRealAuth: true,
+    lastLogin: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    emailVerified: true
+  };
+
+  await saveUserProfileToFirestore(userRecord);
+  return userRecord;
+}
+
+/**
+ * Signs out from Firebase Authentication and clears session tokens
+ */
+export async function signOutActiveSession(): Promise<void> {
+  try {
+    await signOut(auth);
+    console.log('[Auth] Successfully signed out of Firebase session.');
+  } catch (err) {
+    console.warn('[Auth] Sign-out warning:', err);
+  }
+}
+
+/**
+ * Listen for live Firebase Authentication state changes
+ */
+export function listenToAuthSession(callback: (user: User | null, fbUser: FirebaseUser | null) => void): () => void {
+  return onAuthStateChanged(auth, async (fbUser) => {
+    if (fbUser) {
+      const profile = await getUserProfileFromFirestore(fbUser.uid);
+      const user: User = {
+        id: fbUser.uid,
+        name: fbUser.displayName || profile?.name || 'Authorized Operator',
+        email: fbUser.email || profile?.email || 'officer@ner-logix.gov.in',
+        role: profile?.role || 'Administrator',
+        department: profile?.department || 'Ministry of Development of North Eastern Region (MDoNER)',
+        badgeId: profile?.badgeId || `NER-UID-${fbUser.uid.slice(0, 6).toUpperCase()}`,
+        avatar: fbUser.photoURL || profile?.avatar,
+        authProvider: 'google.com',
+        isRealAuth: true,
+        lastLogin: new Date().toISOString(),
+        emailVerified: fbUser.emailVerified
+      };
+      callback(user, fbUser);
+    } else {
+      callback(null, null);
+    }
+  });
+}
+
+/**
+ * Real-time listener for user profile and role from Cloud Firestore (/users/{userId})
+ */
+export function subscribeToUserProfile(
+  userId: string,
+  callback: (profile: FirestoreUserProfile | null, error?: Error) => void
+): () => void {
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    return onSnapshot(
+      userDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          callback(snapshot.data() as FirestoreUserProfile);
+        } else {
+          callback(null);
+        }
+      },
+      (error) => {
+        console.warn(`[Firestore] Error listening to user profile ${userId}:`, error);
+        callback(null, error);
+      }
+    );
+  } catch (err: any) {
+    console.warn('[Firestore] subscribeToUserProfile initialization error:', err);
+    return () => {};
+  }
+}
+
+

@@ -8,6 +8,14 @@ service cloud.firestore {
              data.updatedAt is string;
     }
 
+    function isValidUser(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.email is string &&
+             data.role is string &&
+             data.lastLogin is string;
+    }
+
     function isValidRealtimeAlert(data) {
       return data.title is string &&
              data.body is string &&
@@ -21,6 +29,40 @@ service cloud.firestore {
              data.title is string &&
              data.message is string &&
              data.timestamp is string;
+    }
+
+    function isValidDistrictInventory(data) {
+      return data.districtId is string &&
+             data.districtName is string &&
+             data.state is string &&
+             data.lastAudited is string;
+    }
+
+    function isValidRedistributionTransfer(data) {
+      return data.transferId is string &&
+             data.sourceDistrict is string &&
+             data.targetDistrict is string &&
+             data.commodity is string &&
+             data.quantity is number &&
+             data.timestamp is string;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidUser(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /district_inventories/{inventoryId} {
+      allow read: if true;
+      allow create, update: if isValidDistrictInventory(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /redistribution_transfers/{transferId} {
+      allow read: if true;
+      allow create, update: if isValidRedistributionTransfer(request.resource.data);
+      allow delete: if true;
     }
 
     match /fcm_device_tokens/{tokenId} {

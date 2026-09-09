@@ -35,6 +35,19 @@ export interface User {
   avatar?: string;
   department: string;
   badgeId: string;
+  authProvider?: 'google.com' | 'password' | 'ner-portal' | 'firebase';
+  isRealAuth?: boolean;
+  lastLogin?: string;
+  createdAt?: string;
+  emailVerified?: boolean;
+  sessionToken?: string;
+}
+
+export interface UserSessionMeta {
+  sessionStartedAt: string;
+  lastActivityAt: string;
+  authMethod: string;
+  tokenExpiresInMinutes: number;
 }
 
 export interface Vehicle {
@@ -171,3 +184,94 @@ export interface DemoStep {
   aiOutput: string;
   activeHighlight: string;
 }
+
+export type CommodityCategory = 
+  | 'Medicines & Cold Chain' 
+  | 'Emergency Food Rations' 
+  | 'Fuel & Energy' 
+  | 'Potable Water & Hygiene' 
+  | 'Disaster Relief & Shelter';
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  category: CommodityCategory;
+  currentStock: number;
+  unit: string;
+  minBufferThreshold: number;
+  dailyBurnRate: number;
+  daysOfStockRemaining: number;
+  status: 'ADEQUATE' | 'MODERATE' | 'LOW' | 'CRITICAL';
+  storageRequirement: 'Refrigerated Cold-Chain (2-8°C)' | 'Dry Ambient' | 'Hazardous / Fuel Depot' | 'Pressurized Oxygen';
+}
+
+export interface DistrictSupplyDepot {
+  id: string;
+  name: string;
+  district: string;
+  state: string;
+  coords: LatLng;
+  elevationM: number;
+  depotType: 'Remote Hill Depot' | 'Forward Border Staging Post' | 'Regional Buffer Warehouse' | 'Mother Central Hub';
+  populationServed: number;
+  dependentCorridors: string[];
+  inventory: InventoryItem[];
+  totalStockTons: number;
+  capacityTons: number;
+  isolationRiskScore: number; // 0-100
+  isIsolated: boolean;
+  activeDisruptionCount: number;
+  estimatedBlockadeHours: number;
+  lastAudited: string;
+}
+
+export interface RedistributionSuggestion {
+  id: string;
+  sourceDepotId: string;
+  sourceDepotName: string;
+  targetDepotId: string;
+  targetDepotName: string;
+  commodityId: string;
+  commodityName: string;
+  category: CommodityCategory;
+  transferQuantity: number;
+  unit: string;
+  urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+  reason: string;
+  triggeringDisruptions: string[];
+  currentStockDays: number;
+  projectedStockDaysAfter: number;
+  recommendedRoute: string;
+  transportMode: '4WD 5-Ton Convoy' | 'Refrigerated Cold-Chain Van' | 'Fuel Tanker Carrier' | 'Emergency Helicopter Air-Drop';
+  estimatedTransitHours: number;
+  deadlineHours: number;
+  status: 'PENDING_APPROVAL' | 'DISPATCHED' | 'COMPLETED';
+  approvedAt?: string;
+  dispatchVehicleId?: string;
+}
+
+export interface WeatherEtaAdjustment {
+  vehicleId: string;
+  nominalMinutes: number;
+  nominalEtaFormatted: string;
+  adjustedMinutes: number;
+  adjustedEtaFormatted: string;
+  delayDeltaMinutes: number;
+  delayDeltaFormatted: string;
+  predictedArrivalTimestamp: string;
+  distanceRemainingKm: number;
+  weatherHazardScore: number; // 0 - 100
+  weatherConditionSummary: string;
+  weatherSeverity: SeverityLevel;
+  activeWeatherAlerts: AlertItem[];
+  nearestStation?: WeatherStation;
+  safeSpeedRecommendationKmH: number;
+  delayBreakdown: {
+    rainfallDecelerationMinutes: number;
+    slopeHazardMinutes: number;
+    visibilityOrSlushMinutes: number;
+  };
+  driverAdvisory: string;
+}
+
+export type { OfflineShelterPoint, OfflineCorridor } from '../data/offlineCorridorData';

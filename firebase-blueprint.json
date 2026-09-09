@@ -1,5 +1,37 @@
 {
   "entities": {
+    "DistrictInventory": {
+      "title": "District Inventory",
+      "description": "District supply depot stockpiles and isolation vulnerability index",
+      "type": "object",
+      "properties": {
+        "districtId": { "type": "string", "description": "Unique district or depot code" },
+        "districtName": { "type": "string", "description": "District name" },
+        "state": { "type": "string", "description": "State name" },
+        "isolationRiskScore": { "type": "number", "description": "Risk score from 0 to 100" },
+        "criticalCutoffHours": { "type": "number", "description": "Estimated hours until stock depletion" },
+        "lastAudited": { "type": "string", "description": "Timestamp string of last audit" }
+      },
+      "required": ["districtId", "districtName", "state", "lastAudited"]
+    },
+    "RedistributionTransfer": {
+      "title": "Redistribution Transfer",
+      "description": "Automated supply reallocation directive between surplus and deficit depots",
+      "type": "object",
+      "properties": {
+        "transferId": { "type": "string", "description": "Unique transfer directive ID" },
+        "sourceDistrict": { "type": "string", "description": "Source surplus warehouse name" },
+        "targetDistrict": { "type": "string", "description": "Target remote district depot name" },
+        "commodity": { "type": "string", "description": "Name of redistributed commodity" },
+        "quantity": { "type": "number", "description": "Transfer quantity" },
+        "unit": { "type": "string", "description": "Unit of measurement" },
+        "urgency": { "type": "string", "description": "Urgency rating" },
+        "status": { "type": "string", "description": "Transfer status" },
+        "timestamp": { "type": "string", "description": "Timestamp string" },
+        "approvedBy": { "type": "string", "description": "Operator or system approval badge" }
+      },
+      "required": ["transferId", "sourceDistrict", "targetDistrict", "commodity", "quantity", "timestamp"]
+    },
     "FcmDeviceToken": {
       "title": "FCM Device Token",
       "description": "Registered device push notification token and topic subscriptions",
@@ -43,9 +75,39 @@
         "pushedToFCM": { "type": "boolean", "description": "Whether push alert was triggered" }
       },
       "required": ["deliveryId", "title", "message", "timestamp"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User account profile and operational session record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Unique identifier of the user (e.g. Firebase Auth UID)" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "email": { "type": "string", "description": "Email address" },
+        "role": { "type": "string", "description": "Operational system role" },
+        "department": { "type": "string", "description": "Department or agency name" },
+        "badgeId": { "type": "string", "description": "Assigned operational badge number" },
+        "avatar": { "type": "string", "description": "User avatar or profile picture URL" },
+        "authProvider": { "type": "string", "description": "Authentication provider" },
+        "lastLogin": { "type": "string", "description": "Timestamp of latest login" },
+        "createdAt": { "type": "string", "description": "Account registration timestamp" }
+      },
+      "required": ["userId", "name", "email", "role", "lastLogin"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Persistent user profiles and authenticated session credentials"
+    },
+    "/district_inventories/{inventoryId}": {
+      "schema": "DistrictInventory",
+      "description": "Real-time district stockpile and isolation vulnerability records"
+    },
+    "/redistribution_transfers/{transferId}": {
+      "schema": "RedistributionTransfer",
+      "description": "Cross-referenced inventory redistribution transfers and dispatch orders"
+    },
     "/fcm_device_tokens/{tokenId}": {
       "schema": "FcmDeviceToken",
       "description": "Collection of FCM device tokens for delivery and closure alerts"

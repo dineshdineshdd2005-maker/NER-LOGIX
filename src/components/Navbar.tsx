@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { DEMO_USERS } from '../data/mockData';
+import { UserRole } from '../types';
 import { 
   Search, 
   Bell, 
@@ -14,7 +14,11 @@ import {
   Radio,
   CheckCircle2,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  LogOut,
+  Clock,
+  Shield,
+  Key
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
@@ -38,7 +42,11 @@ export const Navbar: React.FC = () => {
     acknowledgeAlert,
     lastCachedTime,
     serviceWorkerActive,
-    setIsFcmOpen
+    setIsFcmOpen,
+    logoutUser,
+    updateUserRole,
+    sessionDurationMinutes,
+    sessionStartTime
   } = useApp();
 
   const [showRoleDropdown, setShowRoleDropdown] = useState(false);
@@ -219,67 +227,96 @@ export const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* User Profile & Role Switcher */}
+          {/* User Profile & Real Session Cockpit */}
           <div className="relative">
             <button
               onClick={() => setShowRoleDropdown(!showRoleDropdown)}
               className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 rounded-lg px-2.5 py-1 text-xs cursor-pointer transition"
             >
-              <div className="w-7 h-7 rounded-full bg-slate-200 border border-slate-300 text-slate-800 font-bold flex items-center justify-center text-xs">
-                {currentUser?.name.charAt(0) || 'D'}
+              <div className="w-7 h-7 rounded-full bg-indigo-100 border border-indigo-300 text-indigo-800 font-bold flex items-center justify-center text-xs">
+                {currentUser?.name.charAt(0) || 'U'}
               </div>
               <div className="text-left hidden lg:block">
-                <div className="font-bold text-slate-800 text-xs leading-none">{currentUser?.name.split(' ')[0]}</div>
-                <div className="text-[10px] text-slate-500 font-medium leading-tight">{currentUser?.role}</div>
+                <div className="font-bold text-slate-800 text-xs leading-none">{currentUser?.name || 'Operator'}</div>
+                <div className="text-[10px] text-slate-500 font-medium leading-tight">{currentUser?.role || 'Guest'}</div>
               </div>
               <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
 
             {showRoleDropdown && (
-              <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl p-2 z-50 text-slate-800">
-                <div className="px-2 py-1.5 border-b border-slate-100 mb-1">
-                  <div className="text-xs font-bold text-slate-900">{currentUser?.name}</div>
-                  <div className="text-[11px] text-slate-500">{currentUser?.department}</div>
-                  <div className="text-[10px] text-indigo-600 font-mono mt-0.5">Badge: {currentUser?.badgeId}</div>
+              <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl p-3 z-50 text-slate-800">
+                {/* User Session Header */}
+                <div className="px-2 py-2 border-b border-slate-100 mb-2 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">{currentUser?.name}</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      {currentUser?.authProvider === 'google.com' ? 'Google Auth' : 'Operational'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">{currentUser?.email}</div>
+                  <div className="text-[10px] text-slate-500 mt-1 leading-snug">{currentUser?.department}</div>
+                  <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                    <span>Badge: <strong className="text-slate-700 font-mono">{currentUser?.badgeId}</strong></span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-2.5 h-2.5 text-slate-400" />
+                      <span>{sessionDurationMinutes}m active</span>
+                    </span>
+                  </div>
                 </div>
 
                 <div className="text-[10px] font-semibold text-slate-400 px-2 py-1 uppercase tracking-wider">
-                  Select User Persona:
+                  Switch Operational Role:
                 </div>
 
-                <div className="space-y-1">
-                  {DEMO_USERS.map((u) => (
+                <div className="space-y-1 my-1">
+                  {(
+                    [
+                      'Administrator',
+                      'Logistics Operator',
+                      'Government / Disaster Management Officer',
+                      'Field Officer',
+                      'Driver'
+                    ] as UserRole[]
+                  ).map((role) => (
                     <button
-                      key={u.id}
+                      key={role}
                       onClick={() => {
-                        setCurrentUser(u);
+                        updateUserRole(role);
                         setShowRoleDropdown(false);
                       }}
-                      className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between transition cursor-pointer ${
-                        currentUser?.id === u.id
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
+                        currentUser?.role === role
                           ? 'bg-indigo-50 text-indigo-900 font-bold border border-indigo-200'
-                          : 'hover:bg-slate-100 text-slate-700'
+                          : 'hover:bg-slate-50 text-slate-700'
                       }`}
                     >
-                      <div>
-                        <div className="font-medium">{u.name}</div>
-                        <div className="text-[10px] text-slate-500">{u.role}</div>
-                      </div>
-                      {currentUser?.id === u.id && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />}
+                      <div className="truncate">{role}</div>
+                      {currentUser?.role === role && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
                     </button>
                   ))}
                 </div>
 
-                <div className="mt-2 pt-2 border-t border-slate-100">
+                <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-1">
                   <button
                     onClick={() => {
-                      setCurrentUser(null);
                       setShowRoleDropdown(false);
                       setActiveTab('login');
                     }}
-                    className="w-full text-center text-xs text-red-600 hover:text-red-700 py-1 font-semibold cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 rounded text-xs text-slate-700 hover:bg-slate-50 flex items-center justify-between cursor-pointer"
                   >
-                    Switch to Login Screen
+                    <span>Manage Session / Change User</span>
+                    <span className="text-[10px] text-slate-400">Portal →</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowRoleDropdown(false);
+                      logoutUser();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded text-xs text-red-600 hover:bg-red-50 font-semibold flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out of Session</span>
                   </button>
                 </div>
               </div>

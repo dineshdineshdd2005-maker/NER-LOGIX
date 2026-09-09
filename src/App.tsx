@@ -15,6 +15,7 @@ import { AlertsCenterView } from './views/AlertsCenterView';
 import { DeliveriesView } from './views/DeliveriesView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { AdminPanelView } from './views/AdminPanelView';
+import { SupplyChainRedistributionView } from './views/SupplyChainRedistributionView';
 import { FcmAlertBanner } from './components/FcmAlertBanner';
 import { FcmNotificationCenter } from './components/FcmNotificationCenter';
 import { CheckCircle2, AlertTriangle, Info, AlertCircle, X } from 'lucide-react';
@@ -38,6 +39,8 @@ const AppContent: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <DashboardView />;
+      case 'supply-inventory':
+        return <SupplyChainRedistributionView />;
       case 'map':
         return <MapView />;
       case 'risk-prediction':

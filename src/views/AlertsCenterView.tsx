@@ -14,7 +14,8 @@ import {
   Clock, 
   MapPin, 
   Radio, 
-  Send 
+  Send,
+  Boxes
 } from 'lucide-react';
 import { pushEmergencyRoadClosure } from '../lib/firebase';
 
@@ -27,7 +28,9 @@ export const AlertsCenterView: React.FC = () => {
     setActiveTab, 
     setSelectedVehicleId, 
     showToast,
-    setIsFcmOpen
+    setIsFcmOpen,
+    redistributionSuggestions,
+    supplySummary
   } = useApp();
 
   const [filterSeverity, setFilterSeverity] = useState<SeverityLevel | 'ALL'>('ALL');
@@ -145,6 +148,36 @@ export const AlertsCenterView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Automated Supply Chain Inventory Cross-Reference Banner */}
+      {redistributionSuggestions.length > 0 && (
+        <div className="bg-linear-to-r from-red-50 via-amber-50 to-indigo-50 border border-red-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2 bg-red-100 text-red-700 rounded-lg shrink-0">
+              <Boxes className="w-5 h-5 text-red-600" />
+            </div>
+            <div>
+              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span>Supply Chain Vulnerability Alert:</span>
+                <span className="text-[11px] font-bold px-2 py-0.5 bg-red-600 text-white rounded-full">
+                  {supplySummary.criticalDepotsCount} Remote Outposts Threatened
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Incoming weather & road disruptions cross-referenced with stockpiles. <strong className="text-slate-800">{redistributionSuggestions.length} emergency reallocations</strong> suggested to prevent stock exhaustion.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setActiveTab('supply-inventory')}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs shrink-0 cursor-pointer"
+          >
+            <span>Review Redistribution Orders</span>
+            <span>&rarr;</span>
+          </button>
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col md:flex-row items-center justify-between gap-3 text-xs shadow-sm">

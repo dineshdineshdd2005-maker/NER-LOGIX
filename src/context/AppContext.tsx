@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { 
   User, 
+  UserRole,
   Vehicle, 
   AlertItem, 
   FieldReport, 
@@ -8,7 +9,10 @@ import {
   RouteOption, 
   RiskZone, 
   WeatherStation, 
-  SeverityLevel 
+  SeverityLevel,
+  DistrictSupplyDepot,
+  InventoryItem,
+  RedistributionSuggestion 
 } from '../types';
 import { 
   DEMO_USERS, 
@@ -22,9 +26,21 @@ import {
   ROUTE_A_COORDS,
   ROUTE_B_COORDS
 } from '../data/mockData';
+import { INITIAL_DISTRICT_DEPOTS } from '../data/inventoryData';
+import { evaluateSupplyChainCrossReference } from '../lib/inventoryCrossReference';
+import { 
+  recordRedistributionTransferToFirestore,
+  signInWithGoogle,
+  createOperationalSession,
+  signOutActiveSession,
+  saveUserProfileToFirestore,
+  getUserProfileFromFirestore,
+  listenToAuthSession
+} from '../lib/firebase';
 
 export type NavTab = 
   | 'dashboard'
+  | 'supply-inventory'
   | 'tracking'
   | 'optimizer'
   | 'risk-prediction'
@@ -35,7 +51,8 @@ export type NavTab =
   | 'analytics'
   | 'alerts'
   | 'admin'
-  | 'settings';
+  | 'settings'
+  | 'login';
 
 interface MapFilters {
   vehicles: boolean;
@@ -46,6 +63,7 @@ interface MapFilters {
   riskZones: boolean;
   fieldReports: boolean;
   routes: boolean;
+  offlineTiles: boolean;
 }
 
 interface AppContextType {
@@ -70,6 +88,8 @@ interface AppContextType {
   syncOfflineReports: () => void;
   mapFilters: MapFilters;
   toggleMapFilter: (key: keyof MapFilters) => void;
+  selectedOfflineCorridorId: string;
+  setSelectedOfflineCorridorId: (id: string) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   acknowledgeAlert: (id: string) => void;
@@ -111,9 +131,55 @@ interface AppContextType {
   // Firebase Cloud Messaging (FCM) Integration
   isFcmOpen: boolean;
   setIsFcmOpen: (open: boolean) => void;
+  // Supply Chain Inventory Redistribution System
+  districtDepots: DistrictSupplyDepot[];
+  setDistrictDepots: React.Dispatch<React.SetStateAction<DistrictSupplyDepot[]>>;
+  redistributionSuggestions: RedistributionSuggestion[];
+  executedTransfers: RedistributionSuggestion[];
+  approveAndDispatchTransfer: (suggestionId: string) => Promise<void>;
+  simulateDisruptionAtCorridor: (corridorName: string, severity?: SeverityLevel) => void;
+  reEvaluateSupplyChain: () => void;
+  isEvaluatingSupply: boolean;
+  supplySummary: {
+    criticalDepotsCount: number;
+    isolatedDepotsCount: number;
+    totalStockDeficitTons: number;
+    activeDisruptionsCorrelated: number;
+    lastEvaluationTime: string;
+  };
+  // Real Session & Authentication Management
+  loginWithGoogle: () => Promise<User>;
+  loginWithOperationalSession: (params: {
+    name: string;
+    email: string;
+    role: UserRole;
+    department?: string;
+    badgeId?: string;
+    avatar?: string;
+  }) => Promise<User>;
+  logoutUser: () => Promise<void>;
+  updateUserRole: (newRole: UserRole) => Promise<void>;
+  updateUserProfile: (updates: Partial<User>) => Promise<void>;
+  sessionDurationMinutes: number;
+  sessionStartTime: string;
 }
 
+export const DEFAULT_AUTHENTIC_USER: User = {
+  id: 'session-dinesh',
+  name: 'Dinesh D',
+  email: 'dineshdineshdd2005@gmail.com',
+  role: 'Administrator',
+  department: 'Ministry of Development of North Eastern Region (MDoNER)',
+  badgeId: 'NER-ADM-704',
+  authProvider: 'ner-portal',
+  isRealAuth: true,
+  lastLogin: new Date().toISOString(),
+  emailVerified: true
+};
+
 const CACHE_KEYS = {
+  ACTIVE_SESSION: 'ner_logix_active_session_v3',
+  SESSION_START_TIME: 'ner_logix_session_start_v3',
   VEHICLES: 'ner_logix_cached_vehicles_v2',
   ALERTS: 'ner_logix_cached_alerts_v2',
   FIELD_REPORTS: 'ner_logix_cached_field_reports_v2',
@@ -123,6 +189,8 @@ const CACHE_KEYS = {
   WEATHER_STATIONS: 'ner_logix_cached_weather_stations_v2',
   OFFLINE_QUEUE: 'ner_logix_cached_offline_queue_v2',
   LAST_CACHED: 'ner_logix_cached_timestamp_v2',
+  DISTRICT_DEPOTS: 'ner_logix_cached_depots_v2',
+  EXECUTED_TRANSFERS: 'ner_logix_cached_transfers_v2',
 } as const;
 
 function loadCachedData<T>(key: string, fallback: T): T {
@@ -150,8 +218,14 @@ function saveCachedData<T>(key: string, data: T): void {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Start with default logged-in Administrator for instant review
-  const [currentUser, setCurrentUser] = useState<User | null>(DEMO_USERS[0]);
+  // User Session Management: Persistent, non-demo authenticated state
+  const [currentUser, setCurrentUser] = useState<User | null>(() =>
+    loadCachedData<User | null>(CACHE_KEYS.ACTIVE_SESSION, DEFAULT_AUTHENTIC_USER)
+  );
+  const [sessionStartTime, setSessionStartTime] = useState<string>(() =>
+    loadCachedData<string>(CACHE_KEYS.SESSION_START_TIME, new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }))
+  );
+  const [sessionDurationMinutes, setSessionDurationMinutes] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
 
   // Critical Logistics Datasets initialized with Local-Storage Cache fallbacks
@@ -184,8 +258,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     riskZones: true,
     fieldReports: true,
     routes: true,
+    offlineTiles: false,
   });
 
+  const [selectedOfflineCorridorId, setSelectedOfflineCorridorId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>('NER-TRUCK-104');
   const [aiExplanationRoute, setAiExplanationRoute] = useState<RouteOption | null>(INITIAL_ROUTE_OPTIONS[0]);
@@ -198,6 +274,170 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // FCM Notification Center Modal State
   const [isFcmOpen, setIsFcmOpen] = useState<boolean>(false);
 
+  // Supply Chain Inventory Redistribution System State
+  const [districtDepots, setDistrictDepots] = useState<DistrictSupplyDepot[]>(() =>
+    loadCachedData(CACHE_KEYS.DISTRICT_DEPOTS, INITIAL_DISTRICT_DEPOTS)
+  );
+  const [executedTransfers, setExecutedTransfers] = useState<RedistributionSuggestion[]>(() =>
+    loadCachedData(CACHE_KEYS.EXECUTED_TRANSFERS, [])
+  );
+  const [redistributionSuggestions, setRedistributionSuggestions] = useState<RedistributionSuggestion[]>([]);
+  const [isEvaluatingSupply, setIsEvaluatingSupply] = useState<boolean>(false);
+  const [supplySummary, setSupplySummary] = useState({
+    criticalDepotsCount: 2,
+    isolatedDepotsCount: 2,
+    totalStockDeficitTons: 18.5,
+    activeDisruptionsCorrelated: 4,
+    lastEvaluationTime: 'Just now'
+  });
+
+  const reEvaluateSupplyChain = () => {
+    setIsEvaluatingSupply(true);
+    try {
+      const result = evaluateSupplyChainCrossReference(
+        districtDepots,
+        weatherStations,
+        alerts,
+        fieldReports,
+        riskZones
+      );
+      // Filter out suggestions that are already in executedTransfers
+      const pendingSuggestions = result.suggestions.filter(
+        (s) => !executedTransfers.some((ex) => ex.id === s.id && ex.status === 'DISPATCHED')
+      );
+      setRedistributionSuggestions(pendingSuggestions);
+      setSupplySummary(result.summary);
+      setDistrictDepots(result.depotsWithUpdatedRisk);
+      saveCachedData(CACHE_KEYS.DISTRICT_DEPOTS, result.depotsWithUpdatedRisk);
+    } catch (e) {
+      console.warn('Cross-reference evaluation error:', e);
+    } finally {
+      setTimeout(() => setIsEvaluatingSupply(false), 300);
+    }
+  };
+
+  // Re-run cross-referencing on mounts and whenever alerts, weather stations, or field reports change
+  useEffect(() => {
+    reEvaluateSupplyChain();
+  }, [alerts.length, weatherStations.length, fieldReports.length]);
+
+  const approveAndDispatchTransfer = async (suggestionId: string) => {
+    const suggestion = redistributionSuggestions.find(s => s.id === suggestionId);
+    if (!suggestion) return;
+
+    // Deduct stock from source depot and increment in-transit buffer at destination
+    setDistrictDepots(prevDepots => {
+      const updated = prevDepots.map(depot => {
+        if (depot.id === suggestion.sourceDepotId) {
+          return {
+            ...depot,
+            inventory: depot.inventory.map(item => {
+              if (item.id === suggestion.commodityId || item.category === suggestion.category) {
+                const newStock = Math.max(0, item.currentStock - suggestion.transferQuantity);
+                return {
+                  ...item,
+                  currentStock: newStock,
+                  daysOfStockRemaining: Number((newStock / (item.dailyBurnRate || 1)).toFixed(1))
+                };
+              }
+              return item;
+            })
+          };
+        }
+        if (depot.id === suggestion.targetDepotId) {
+          return {
+            ...depot,
+            inventory: depot.inventory.map(item => {
+              if (item.id === suggestion.commodityId) {
+                const updatedDays = Number((suggestion.projectedStockDaysAfter).toFixed(1));
+                return {
+                  ...item,
+                  daysOfStockRemaining: updatedDays,
+                  status: (updatedDays < 3 ? 'LOW' : 'ADEQUATE') as InventoryItem['status']
+                };
+              }
+              return item;
+            })
+          };
+        }
+        return depot;
+      });
+      saveCachedData(CACHE_KEYS.DISTRICT_DEPOTS, updated);
+      return updated;
+    });
+
+    const dispatchedRecord: RedistributionSuggestion = {
+      ...suggestion,
+      status: 'DISPATCHED',
+      approvedAt: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    };
+
+    setExecutedTransfers(prev => {
+      const updated = [dispatchedRecord, ...prev];
+      saveCachedData(CACHE_KEYS.EXECUTED_TRANSFERS, updated);
+      return updated;
+    });
+    setRedistributionSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+
+    // Create a new delivery consignment for tracking
+    const newDelivery: Omit<DeliveryItem, 'id'> = {
+      consignmentCode: `REDIST-${Math.floor(1000 + Math.random() * 9000)}`,
+      vehicleId: 'NER-REDIST-01',
+      vehiclePlate: 'AS-01-RD-9901',
+      driverName: 'Subedar T. Wangchu (4WD Escort)',
+      origin: suggestion.sourceDepotName,
+      destination: suggestion.targetDepotName,
+      goods: suggestion.commodityName.includes('Vaccine') || suggestion.commodityName.includes('Cold') ? 'Cold Chain Vaccines' :
+             suggestion.commodityName.includes('Medicine') || suggestion.commodityName.includes('Antibiotic') ? 'Medicines' :
+             suggestion.commodityName.includes('Diesel') || suggestion.commodityName.includes('Fuel') ? 'Fuel' :
+             suggestion.commodityName.includes('Rice') || suggestion.commodityName.includes('Food') ? 'Food Supplies' : 'Emergency Supplies',
+      priority: 'Emergency',
+      eta: `${suggestion.estimatedTransitHours} hours`,
+      status: 'Dispatched',
+      risk: suggestion.urgency === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
+      dispatchTime: 'Immediate',
+      weightTons: Number((suggestion.transferQuantity * 0.004).toFixed(1)) || 4.2,
+      currentLocation: suggestion.recommendedRoute.split('→')[0].trim() || suggestion.sourceDepotName
+    };
+    addDelivery(newDelivery);
+
+    // Save to Firestore
+    try {
+      await recordRedistributionTransferToFirestore({
+        transferId: suggestion.id,
+        sourceDistrict: suggestion.sourceDepotName,
+        targetDistrict: suggestion.targetDepotName,
+        commodity: suggestion.commodityName,
+        quantity: suggestion.transferQuantity,
+        unit: suggestion.unit,
+        urgency: suggestion.urgency,
+        status: 'Dispatched',
+        approvedBy: currentUser?.name || 'Logistics Operator'
+      });
+    } catch (err) {
+      console.warn('Firestore transfer recording notice:', err);
+    }
+
+    showToast(`Emergency Redistribution Dispatched: ${suggestion.transferQuantity} ${suggestion.unit} of ${suggestion.commodityName} routed to ${suggestion.targetDepotName}`, 'success');
+  };
+
+  const simulateDisruptionAtCorridor = (corridorName: string, severity: SeverityLevel = 'CRITICAL') => {
+    const newAlert: AlertItem = {
+      id: `alert-sim-${Date.now()}`,
+      title: `⚡ Road Blockage & Slump: ${corridorName}`,
+      description: `Heavy slope subsidence and washed-out roadway section on ${corridorName}. Projected arterial blockade: 72-96 hours.`,
+      locationName: corridorName,
+      coords: { lat: 27.35, lng: 92.42 },
+      severity,
+      source: 'Automated Sensor',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      recommendedAction: 'Trigger emergency buffer reallocation from central stockpile immediately.',
+      isAcknowledged: false,
+    };
+    setAlerts(prev => [newAlert, ...prev]);
+    showToast(`Simulated disruption triggered on ${corridorName}. Recalculating isolation risks...`, 'warning');
+  };
+
   // Toast notification
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'info' | 'error' } | null>(null);
 
@@ -206,6 +446,123 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTimeout(() => {
       setToast(null);
     }, 4500);
+  };
+
+  // ------------------------------------------------------------------------
+  // Real User Session Management & Firebase Auth Integration
+  // ------------------------------------------------------------------------
+
+  // Session duration timer (increments active session minutes)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSessionDurationMinutes(prev => prev + 1);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Sync session state to localStorage and Firestore
+  useEffect(() => {
+    if (currentUser) {
+      saveCachedData(CACHE_KEYS.ACTIVE_SESSION, currentUser);
+      saveUserProfileToFirestore(currentUser).catch(() => {});
+    }
+  }, [currentUser]);
+
+  // Listen for live Firebase Authentication state changes
+  useEffect(() => {
+    const unsubscribe = listenToAuthSession((authUser) => {
+      if (authUser) {
+        console.log('[Auth Session] Firebase user session detected:', authUser.email);
+        setCurrentUser(authUser);
+        saveCachedData(CACHE_KEYS.ACTIVE_SESSION, authUser);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const loginWithGoogle = async (): Promise<User> => {
+    try {
+      const user = await signInWithGoogle();
+      setCurrentUser(user);
+      const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      setSessionStartTime(nowTime);
+      setSessionDurationMinutes(0);
+      saveCachedData(CACHE_KEYS.ACTIVE_SESSION, user);
+      saveCachedData(CACHE_KEYS.SESSION_START_TIME, nowTime);
+      showToast(`Authenticated via Google: ${user.email}`, 'success');
+      setActiveTab('dashboard');
+      return user;
+    } catch (err: any) {
+      console.error('Google Sign-in failed:', err);
+      showToast(`Google Sign-In: ${err?.message || 'Could not complete popup sign-in. Please check popup permissions.'}`, 'error');
+      throw err;
+    }
+  };
+
+  const loginWithOperationalSession = async (params: {
+    name: string;
+    email: string;
+    role: UserRole;
+    department?: string;
+    badgeId?: string;
+    avatar?: string;
+  }): Promise<User> => {
+    try {
+      const user = await createOperationalSession(params);
+      setCurrentUser(user);
+      const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      setSessionStartTime(nowTime);
+      setSessionDurationMinutes(0);
+      saveCachedData(CACHE_KEYS.ACTIVE_SESSION, user);
+      saveCachedData(CACHE_KEYS.SESSION_START_TIME, nowTime);
+      showToast(`Welcome ${user.name}! Operational session activated.`, 'success');
+      setActiveTab('dashboard');
+      return user;
+    } catch (err: any) {
+      console.error('Session creation failed:', err);
+      showToast(`Failed to initialize session: ${err?.message}`, 'error');
+      throw err;
+    }
+  };
+
+  const logoutUser = async (): Promise<void> => {
+    try {
+      await signOutActiveSession();
+      setCurrentUser(null);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(CACHE_KEYS.ACTIVE_SESSION);
+      }
+      showToast('Session ended. Signed out securely.', 'info');
+      setActiveTab('login');
+    } catch (err: any) {
+      showToast(`Sign out error: ${err?.message}`, 'error');
+    }
+  };
+
+  const updateUserRole = async (newRole: UserRole): Promise<void> => {
+    if (!currentUser) return;
+    const updated: User = {
+      ...currentUser,
+      role: newRole,
+      lastLogin: new Date().toISOString()
+    };
+    setCurrentUser(updated);
+    saveCachedData(CACHE_KEYS.ACTIVE_SESSION, updated);
+    await saveUserProfileToFirestore(updated).catch(() => {});
+    showToast(`Operational role switched to ${newRole}`, 'info');
+  };
+
+  const updateUserProfile = async (updates: Partial<User>): Promise<void> => {
+    if (!currentUser) return;
+    const updated: User = {
+      ...currentUser,
+      ...updates,
+      lastLogin: new Date().toISOString()
+    };
+    setCurrentUser(updated);
+    saveCachedData(CACHE_KEYS.ACTIVE_SESSION, updated);
+    await saveUserProfileToFirestore(updated).catch(() => {});
+    showToast('User profile updated and saved to Firestore.', 'success');
   };
 
   const toggleMapFilter = (key: keyof MapFilters) => {
@@ -217,7 +574,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!offline && offlineQueue.length > 0) {
       syncOfflineReports();
     } else if (offline) {
-      showToast('Network Disconnected — Operating in Offline Mode (Local Storage Active)', 'warning');
+      // Auto-activate offline corridor cached tiles when network is lost
+      setMapFilters(prev => ({ ...prev, offlineTiles: true }));
+      showToast('Network Disconnected — Switched to Offline Tactical Map Tiles & Local Storage', 'warning');
     } else {
       showToast('Network Restored — Connected to NER Central Cloud Ingress', 'success');
     }
@@ -679,6 +1038,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncOfflineReports,
         mapFilters,
         toggleMapFilter,
+        selectedOfflineCorridorId,
+        setSelectedOfflineCorridorId,
         searchQuery,
         setSearchQuery,
         acknowledgeAlert,
@@ -708,6 +1069,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cacheRecordCount,
         isFcmOpen,
         setIsFcmOpen,
+        districtDepots,
+        setDistrictDepots,
+        redistributionSuggestions,
+        executedTransfers,
+        approveAndDispatchTransfer,
+        simulateDisruptionAtCorridor,
+        reEvaluateSupplyChain,
+        isEvaluatingSupply,
+        supplySummary,
+        loginWithGoogle,
+        loginWithOperationalSession,
+        logoutUser,
+        updateUserRole,
+        updateUserProfile,
+        sessionDurationMinutes,
+        sessionStartTime,
       }}
     >
       {children}

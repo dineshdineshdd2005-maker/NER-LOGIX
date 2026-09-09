@@ -15,7 +15,8 @@ import {
   Settings,
   Sparkles,
   ChevronRight,
-  WifiOff
+  WifiOff,
+  Boxes
 } from 'lucide-react';
 
 interface SidebarItem {
@@ -35,6 +36,7 @@ export const Sidebar: React.FC = () => {
     vehicles, 
     fieldReports, 
     deliveries,
+    redistributionSuggestions,
     isOffline,
     currentUser,
     startLiveDemo,
@@ -44,12 +46,21 @@ export const Sidebar: React.FC = () => {
   const unacknowledgedAlerts = alerts.filter(a => !a.isAcknowledged).length;
   const activeVehicles = vehicles.filter(v => v.status === 'In Transit').length;
   const pendingReports = fieldReports.filter(r => r.status === 'Pending').length;
+  const criticalRedistributions = redistributionSuggestions.filter(r => r.urgency === 'CRITICAL').length;
 
   const coreNavItems: SidebarItem[] = [
     {
       id: 'dashboard',
       label: 'Dashboard',
       icon: LayoutDashboard,
+    },
+    {
+      id: 'supply-inventory',
+      label: 'Supply Redistribution',
+      icon: Boxes,
+      badge: criticalRedistributions > 0 ? `${criticalRedistributions} Alert` : redistributionSuggestions.length || undefined,
+      badgeColor: criticalRedistributions > 0 ? 'bg-red-600' : 'bg-indigo-600',
+      sihHighlight: true,
     },
     {
       id: 'tracking',
@@ -115,6 +126,13 @@ export const Sidebar: React.FC = () => {
       id: 'admin',
       label: 'Admin Panel',
       icon: ShieldCheck,
+    },
+    {
+      id: 'login',
+      label: 'Session & Auth',
+      icon: ShieldCheck,
+      badge: currentUser?.authProvider === 'google.com' ? 'Google' : 'Live',
+      badgeColor: 'bg-indigo-600',
     },
     {
       id: 'settings',

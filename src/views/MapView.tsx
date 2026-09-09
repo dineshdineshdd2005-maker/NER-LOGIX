@@ -1,10 +1,11 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { LeafletMap } from '../components/LeafletMap';
-import { Map, Layers, Compass, ShieldAlert, Sparkles, Navigation } from 'lucide-react';
+import { OfflineCorridorsPanel } from '../components/OfflineCorridorsPanel';
+import { Map, Layers, Compass, ShieldAlert, Sparkles, Navigation, HardDrive } from 'lucide-react';
 
 export const MapView: React.FC = () => {
-  const { vehicles, routes, alerts, fieldReports, setActiveTab, startLiveDemo, isDemoRunning } = useApp();
+  const { vehicles, routes, alerts, fieldReports, setActiveTab, startLiveDemo, isDemoRunning, mapFilters, toggleMapFilter } = useApp();
 
   return (
     <div className="p-6 space-y-4 max-w-7xl mx-auto">
@@ -23,6 +24,19 @@ export const MapView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Quick Offline Mode Toggle Chip */}
+          <button
+            onClick={() => toggleMapFilter('offlineTiles')}
+            className={`text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5 transition cursor-pointer border shadow-2xs ${
+              mapFilters.offlineTiles
+                ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+            }`}
+          >
+            <HardDrive className="w-3.5 h-3.5 text-amber-500" />
+            <span>{mapFilters.offlineTiles ? 'Offline Tiles: Active' : 'Offline Tiles'}</span>
+          </button>
+
           {!isDemoRunning && (
             <button
               onClick={startLiveDemo}
@@ -43,8 +57,11 @@ export const MapView: React.FC = () => {
         </div>
       </div>
 
+      {/* Offline Mode & Key Corridors Cached Layer Control Station */}
+      <OfflineCorridorsPanel />
+
       {/* Full Size GIS Workstation */}
-      <LeafletMap height="680px" showControls={true} />
+      <LeafletMap height="640px" showControls={true} />
     </div>
   );
 };

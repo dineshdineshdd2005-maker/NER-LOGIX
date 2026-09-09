@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { LeafletMap } from '../components/LeafletMap';
 import { RealTimeAlertPanel } from '../components/RealTimeAlertPanel';
 import { AiRiskExplainModal } from '../components/AiRiskExplainModal';
+import { FleetManagementWidget } from '../components/FleetManagementWidget';
+import { ResourceAllocationWidget } from '../components/ResourceAllocationWidget';
+import { 
+  getUserProfileFromFirestore, 
+  subscribeToUserProfile, 
+  saveUserProfileToFirestore 
+} from '../lib/firebase';
+import { UserRole } from '../types';
 import { 
   Truck, 
   Route as RouteIcon, 
@@ -10,18 +18,25 @@ import {
   Bell, 
   PackageCheck, 
   Ban, 
-  Compass, 
   BrainCircuit, 
   Radio, 
-  ArrowUpRight, 
-  Activity,
-  Sparkles,
-  ShieldCheck,
-  ChevronRight
+  Sparkles, 
+  ShieldCheck, 
+  ChevronRight, 
+  Boxes,
+  RefreshCw,
+  Cloud,
+  CheckCircle2,
+  Layers,
+  Sliders,
+  UserCheck,
+  Building
 } from 'lucide-react';
 
 export const DashboardView: React.FC = () => {
   const { 
+    currentUser,
+    updateUserRole,
     vehicles, 
     routes, 
     alerts, 
@@ -32,10 +47,114 @@ export const DashboardView: React.FC = () => {
     startLiveDemo,
     isDemoRunning,
     aiExplanationRoute,
-    setAiExplanationRoute
+    setAiExplanationRoute,
+    redistributionSuggestions,
+    supplySummary,
+    showToast
   } = useApp();
 
   const [explainModalOpen, setExplainModalOpen] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // Live Firebase User Role Fetching & Synchronization State
+  // -------------------------------------------------------------------------
+  const [firebaseRole, setFirebaseRole] = useState<UserRole>(currentUser?.role || 'Administrator');
+  const [isFetchingFirebase, setIsFetchingFirebase] = useState<boolean>(true);
+  const [lastFirebaseSyncTime, setLastFirebaseSyncTime] = useState<string>('Just now');
+  const [viewMode, setViewMode] = useState<'AUTO' | 'FLEET' | 'RESOURCE' | 'BOTH'>('AUTO');
+  const [isRoleUpdating, setIsRoleUpdating] = useState<boolean>(false);
+
+  // Real-time listener for user profile and role from Cloud Firestore
+  useEffect(() => {
+    const userId = currentUser?.id || 'session-dinesh';
+    setIsFetchingFirebase(true);
+
+    // Initial direct fetch from Firebase Firestore
+    getUserProfileFromFirestore(userId)
+      .then(profile => {
+        if (profile && profile.role) {
+          setFirebaseRole(profile.role);
+          setLastFirebaseSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        } else if (currentUser) {
+          // Document does not exist yet in Firestore; seed profile
+          saveUserProfileToFirestore(currentUser).then(() => {
+            setFirebaseRole(currentUser.role);
+            setLastFirebaseSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          });
+        }
+      })
+      .catch(err => {
+        console.warn('[Dashboard] Could not fetch role from Firestore, using local session:', err);
+      })
+      .finally(() => {
+        setIsFetchingFirebase(false);
+      });
+
+    // Real-time Firestore snapshot subscription
+    const unsubscribe = subscribeToUserProfile(userId, (profile, error) => {
+      setIsFetchingFirebase(false);
+      if (profile && profile.role) {
+        setFirebaseRole(profile.role as UserRole);
+        setLastFirebaseSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [currentUser?.id]);
+
+  // Keep local role in sync if currentUser changes
+  useEffect(() => {
+    if (currentUser?.role && currentUser.role !== firebaseRole) {
+      setFirebaseRole(currentUser.role);
+    }
+  }, [currentUser?.role]);
+
+  // Handle switching role and writing live to Firebase Firestore
+  const handleSwitchRoleInFirebase = async (newRole: UserRole) => {
+    setIsRoleUpdating(true);
+    try {
+      await updateUserRole(newRole);
+      setFirebaseRole(newRole);
+      setLastFirebaseSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      showToast(`Firebase Role Updated: Now operating as ${newRole}`, 'success');
+    } catch (err: any) {
+      console.error('Failed to update role in Firebase:', err);
+      showToast(`Error updating role in Firebase: ${err?.message}`, 'error');
+    } finally {
+      setIsRoleUpdating(false);
+    }
+  };
+
+  // Manual trigger to re-query Firebase Firestore
+  const handleManualRefreshRole = async () => {
+    const userId = currentUser?.id || 'session-dinesh';
+    setIsFetchingFirebase(true);
+    try {
+      const profile = await getUserProfileFromFirestore(userId);
+      if (profile && profile.role) {
+        setFirebaseRole(profile.role);
+        setLastFirebaseSyncTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        showToast(`Refreshed role from Firebase Firestore: ${profile.role}`, 'info');
+      } else {
+        showToast('Firestore profile synced and verified.', 'info');
+      }
+    } catch (err: any) {
+      showToast(`Firestore check failed: ${err?.message}`, 'error');
+    } finally {
+      setIsFetchingFirebase(false);
+    }
+  };
+
+  // Role detection:
+  // - Dispatcher: 'Logistics Operator' or department containing 'dispatch'
+  // - Administrator: 'Administrator'
+  const isDispatcher = firebaseRole === 'Logistics Operator' || 
+    (currentUser?.department || '').toLowerCase().includes('dispatch') ||
+    (currentUser?.department || '').toLowerCase().includes('fleet');
+
+  const isAdmin = firebaseRole === 'Administrator';
 
   // Calculate top statistics
   const activeVehiclesCount = vehicles.filter(v => v.status === 'In Transit' || v.status === 'Re-routed').length;
@@ -147,6 +266,166 @@ export const DashboardView: React.FC = () => {
         </div>
       </div>
 
+      {/* ========================================================================= */}
+      {/* FIREBASE ROLE STATUS & ROLE-BASED COCKPIT CONTROLS                        */}
+      {/* ========================================================================= */}
+      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-sm space-y-4 border border-slate-800">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Left: Live Firebase Role Identification */}
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+              <Cloud className="w-5 h-5 text-indigo-300" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Firebase Role & Session:
+                </span>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 ${
+                  isDispatcher 
+                    ? 'bg-indigo-500 text-white font-mono'
+                    : isAdmin
+                    ? 'bg-emerald-500 text-white font-mono'
+                    : 'bg-amber-500 text-white font-mono'
+                }`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                  <span>{firebaseRole}</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                  {currentUser?.authProvider === 'google.com' ? 'Google Auth' : 'Operational Session'}
+                </span>
+              </div>
+              <div className="text-xs text-slate-300 mt-1 flex flex-wrap items-center gap-2">
+                <span>User: <strong className="text-white">{currentUser?.name}</strong></span>
+                <span>·</span>
+                <span className="text-slate-400 font-mono text-[11px]">{currentUser?.email}</span>
+                <span>·</span>
+                <span className="text-indigo-300 text-[11px]">{currentUser?.department}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Firebase Live Status & Quick Role Switcher */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-[11px] text-slate-400 font-mono mr-2 hidden sm:block">
+              {isFetchingFirebase ? (
+                <span className="text-amber-400 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>Syncing Firestore...</span>
+                </span>
+              ) : (
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Synced {lastFirebaseSyncTime}</span>
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={isFetchingFirebase || isRoleUpdating}
+              onClick={handleManualRefreshRole}
+              title="Refresh profile from Firebase Firestore"
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetchingFirebase ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Quick Switch Buttons to evaluate both widgets directly */}
+            <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-slate-700 text-xs">
+              <button
+                type="button"
+                disabled={isRoleUpdating}
+                onClick={() => handleSwitchRoleInFirebase('Logistics Operator')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  firebaseRole === 'Logistics Operator'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Dispatcher Role</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isRoleUpdating}
+                onClick={() => handleSwitchRoleInFirebase('Administrator')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  firebaseRole === 'Administrator'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Administrator Role</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* View Mode Selector bar */}
+        <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-slate-400">
+            <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Customized Widget Display:</span>
+            <span className="text-white font-medium">
+              {viewMode === 'AUTO' 
+                ? (isDispatcher ? 'Fleet Management (Auto-selected for Dispatcher)' : 'Resource Allocation (Auto-selected for Administrator)')
+                : viewMode === 'FLEET'
+                ? 'Fleet Management (Manual Preview)'
+                : viewMode === 'RESOURCE'
+                ? 'Resource Allocation (Manual Preview)'
+                : 'Both Customized Widgets (Full Command)'
+              }
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1 text-[11px]">
+            <span className="text-slate-400 mr-1 hidden md:inline">Widget Override:</span>
+            {(['AUTO', 'FLEET', 'RESOURCE', 'BOTH'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-2 py-1 rounded transition cursor-pointer font-medium ${
+                  viewMode === mode
+                    ? 'bg-slate-700 text-white border border-slate-600'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {mode === 'AUTO' ? 'Auto (Role-Based)' : mode === 'FLEET' ? 'Fleet Management' : mode === 'RESOURCE' ? 'Resource Allocation' : 'Show Both'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ROLE-CUSTOMIZED WIDGETS SECTION                                           */}
+      {/* ========================================================================= */}
+      <div className="space-y-6">
+        {/* Render FLEET MANAGEMENT WIDGET: For Dispatchers or when selected */}
+        {(viewMode === 'BOTH' || viewMode === 'FLEET' || (viewMode === 'AUTO' && isDispatcher)) && (
+          <div className="animate-in fade-in duration-300">
+            <FleetManagementWidget 
+              onNavigateTracking={() => setActiveTab('tracking')}
+              onNavigateDeliveries={() => setActiveTab('deliveries')}
+              onNavigateOptimizer={() => setActiveTab('optimizer')}
+            />
+          </div>
+        )}
+
+        {/* Render RESOURCE ALLOCATION WIDGET: For Administrative Users or when selected */}
+        {(viewMode === 'BOTH' || viewMode === 'RESOURCE' || (viewMode === 'AUTO' && (!isDispatcher || isAdmin))) && (
+          <div className="animate-in fade-in duration-300">
+            <ResourceAllocationWidget 
+              onNavigateSupply={() => setActiveTab('supply-inventory')}
+              onNavigateAdmin={() => setActiveTab('admin')}
+            />
+          </div>
+        )}
+      </div>
+
       {/* KPI Overview Grid from Sleek Interface Theme */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {topStats.map((stat, idx) => {
@@ -175,6 +454,36 @@ export const DashboardView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Cross-Referenced Inventory Alert Strip */}
+      {redistributionSuggestions.length > 0 && (
+        <div className="bg-linear-to-r from-red-50 via-amber-50 to-indigo-50 border border-red-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2.5 bg-red-100 text-red-700 rounded-lg shrink-0">
+              <Boxes className="w-5 h-5 text-red-600" />
+            </div>
+            <div>
+              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span>Automated Inventory Cross-Reference Alert:</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 bg-red-600 text-white rounded-full">
+                  {supplySummary.criticalDepotsCount} Outposts Threatened
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Precipitation Doppler & landslide blocks indicate critical stockouts within 48h. <strong className="text-slate-900">{redistributionSuggestions.length} emergency transfers</strong> prepared for dispatch.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setActiveTab('supply-inventory')}
+            className="flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs shrink-0 cursor-pointer"
+          >
+            <span>Review Redistribution Orders</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Grid: Interactive GIS Map + Real-Time Alert Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
